@@ -26,6 +26,8 @@ class NotificationKit:
 		self.telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
 		self.bark_key = os.getenv('BARK_KEY')
 		self.bark_server = os.getenv('BARK_SERVER', 'https://api.day.app')
+		self.hismsg_key = os.getenv('HISMSG_KEY')
+		self.hismsg_server = os.getenv('HISMSG_SERVER', 'https://msg.home.83889573.xyz:38388')
 
 	def send_email(self, title: str, content: str, msg_type: Literal['text', 'html'] = 'text'):
 		if not self.email_user or not self.email_pass or not self.email_to:
@@ -129,8 +131,24 @@ class NotificationKit:
 			'device_key': self.bark_key,
 			'title': title,
 			'body': content,
-			'icon': 'https://anyrouter.top/favicon.ico',  # 可选：尝试使用 AnyRouter 图标
+			'icon': 'https://anyrouter.top/favicon.ico',
 			'group': 'AnyRouter',
+		}
+
+		with httpx.Client(timeout=30.0) as client:
+			client.post(url, json=data)
+
+	def send_hismsg(self, title: str, content: str):
+		if not self.hismsg_key:
+			raise ValueError('HisMsg Key not configured')
+
+		url = f'{self.hismsg_server.rstrip("/")}/api/message/push/send'
+		data = {
+			'userKey': self.hismsg_key,
+			'title': title,
+			'content': content,
+			'group': 'AnyRouter',
+			'level': 'active',
 		}
 
 		with httpx.Client(timeout=30.0) as client:
@@ -147,6 +165,7 @@ class NotificationKit:
 			('Gotify', lambda: self.send_gotify(title, content)),
 			('Telegram', lambda: self.send_telegram(title, content)),
 			('Bark', lambda: self.send_bark(title, content)),
+			('HisMsg', lambda: self.send_hismsg(title, content)),
 		]
 
 		for name, func in notifications:
