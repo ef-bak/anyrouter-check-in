@@ -90,6 +90,8 @@ jobs:
         GOTIFY_PRIORITY: ${{ secrets.GOTIFY_PRIORITY }}
         BARK_KEY: ${{ secrets.BARK_KEY }}
         BARK_SERVER: ${{ secrets.BARK_SERVER }}
+        HISMSG_KEY: ${{ secrets.HISMSG_KEY }}
+        HISMSG_SERVER: ${{ secrets.HISMSG_SERVER }}
       run: |
         uv run checkin.py
 
