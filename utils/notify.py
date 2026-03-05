@@ -142,7 +142,11 @@ class NotificationKit:
 		if not self.hismsg_key:
 			raise ValueError('HisMsg Key not configured')
 
-		url = f'{self.hismsg_server.rstrip("/")}/api/message/push/send'
+		server = self.hismsg_server
+		if not server.startswith('http://') and not server.startswith('https://'):
+			server = f'https://{server}'
+
+		url = f'{server.rstrip("/")}/api/message/push/send'
 		data = {
 			'userKey': self.hismsg_key,
 			'title': title,
