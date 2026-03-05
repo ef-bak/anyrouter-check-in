@@ -27,7 +27,7 @@ class NotificationKit:
 		self.bark_key = os.getenv('BARK_KEY')
 		self.bark_server = os.getenv('BARK_SERVER', 'https://api.day.app')
 		self.hismsg_key = os.getenv('HISMSG_KEY')
-		self.hismsg_server = os.getenv('HISMSG_SERVER', 'https://msg.home.83889573.xyz:38388')
+		self.hismsg_server = os.getenv('HISMSG_SERVER')
 
 	def send_email(self, title: str, content: str, msg_type: Literal['text', 'html'] = 'text'):
 		if not self.email_user or not self.email_pass or not self.email_to:
@@ -141,12 +141,10 @@ class NotificationKit:
 	def send_hismsg(self, title: str, content: str):
 		if not self.hismsg_key:
 			raise ValueError('HisMsg Key not configured')
+		if not self.hismsg_server:
+			raise ValueError('HisMsg server not configured')
 
-		server = self.hismsg_server
-		if not server.startswith('http://') and not server.startswith('https://'):
-			server = f'https://{server}'
-
-		url = f'{server.rstrip("/")}/api/message/push/send'
+		url = f'{self.hismsg_server}/api/message/push/send'
 		data = {
 			'userKey': self.hismsg_key,
 			'title': title,
