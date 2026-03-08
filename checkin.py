@@ -456,7 +456,7 @@ async def main():
 		accounts = get_accounts_from_service(service_config)
 		if not accounts:
 			print('[FAILED] Unable to load accounts from service, program exits')
-			sys.exit(1)
+			sys.exit(0)
 	else:
 		print('[INFO] Account service is disabled, using local configuration')
 		accounts = load_accounts_config()
