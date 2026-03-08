@@ -1,7 +1,7 @@
 name: AnyRouter 自动签到
 on:
   schedule:
-    - cron: '0 */3 * * *'
+    - cron: '30 */9 * * *'
   workflow_dispatch:
 
 jobs:
@@ -10,7 +10,7 @@ jobs:
     environment: production
     env:
       PYTHONIOENCODING: utf-8
-      ACCOUNT_SERVICE_GROUP: ${{ github.repository_owner }}-checkin-1
+      ACCOUNT_SERVICE_GROUP: ${{ github.repository_owner }}-checkin-4
     steps:
     - uses: actions/checkout@v4
 

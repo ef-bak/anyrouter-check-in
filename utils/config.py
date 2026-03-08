@@ -132,6 +132,33 @@ class AppConfig:
 
 
 @dataclass
+class AccountServiceConfig:
+	"""账号服务配置"""
+
+	base_url: str
+	token: str
+	enabled: bool = False
+	account_group: str = 'default'
+
+	@classmethod
+	def load_from_env(cls) -> 'AccountServiceConfig':
+		"""从环境变量加载账号服务配置"""
+		base_url = os.getenv('ACCOUNT_SERVICE_BASE_URL', '')
+		token = os.getenv('ACCOUNT_SERVICE_TOKEN', '')
+		enabled = os.getenv('ACCOUNT_SERVICE_ENABLED', 'false').lower() == 'true'
+		account_group = os.getenv('ACCOUNT_SERVICE_GROUP', 'default')
+
+		if not base_url or not token:
+			enabled = False
+
+		return cls(base_url=base_url, token=token, enabled=enabled, account_group=account_group)
+
+	def is_enabled(self) -> bool:
+		"""检查是否启用账号服务"""
+		return self.enabled and bool(self.base_url) and bool(self.token)
+
+
+@dataclass
 class AccountConfig:
 	"""账号配置"""
 
@@ -139,14 +166,27 @@ class AccountConfig:
 	api_user: str
 	provider: str = 'anyrouter'
 	name: str | None = None
+	account_id: int | None = None
 
 	@classmethod
 	def from_dict(cls, data: dict, index: int) -> 'AccountConfig':
 		"""从字典创建 AccountConfig"""
 		provider = data.get('provider', 'anyrouter')
 		name = data.get('name', f'Account {index + 1}')
+		account_id = data.get('id')
 
-		return cls(cookies=data['cookies'], api_user=data['api_user'], provider=provider, name=name if name else None)
+		return cls(cookies=data['cookies'], api_user=data['api_user'], provider=provider, name=name if name else None, account_id=account_id)
+
+	@classmethod
+	def from_service_dict(cls, data: dict) -> 'AccountConfig':
+		"""从服务接口返回的数据创建 AccountConfig"""
+		return cls(
+			cookies={'session': data.get('session')},
+			api_user=data.get('apiUser'),
+			provider='anyrouter',
+			name=data.get('name'),
+			account_id=data.get('id')
+		)
 
 	def get_display_name(self, index: int) -> str:
 		"""获取显示名称"""

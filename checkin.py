@@ -14,7 +14,7 @@ import httpx
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
-from utils.config import AccountConfig, AppConfig, load_accounts_config
+from utils.config import AccountConfig, AccountServiceConfig, AppConfig, load_accounts_config
 from utils.notify import notify
 
 load_dotenv()
@@ -65,6 +65,118 @@ def parse_cookies(cookies_data):
 	return {}
 
 
+def get_accounts_from_service(service_config: AccountServiceConfig) -> list[AccountConfig] | None:
+	"""从账号服务获取待签到账号"""
+	if not service_config.is_enabled():
+		return None
+
+	try:
+		client = httpx.Client(timeout=30.0)
+		url = f'{service_config.base_url}/checkin/accounts'
+		params = {
+			'accountGroup': service_config.account_group,
+			'token': service_config.token
+		}
+
+		print(f'[INFO] Fetching accounts from service: {url}')
+		response = client.get(url, params=params)
+
+		if response.status_code == 200:
+			result = response.json()
+			if result.get('code') == 200:
+				accounts_data = result.get('data', [])
+				accounts = [AccountConfig.from_service_dict(acc_data) for acc_data in accounts_data]
+				print(f'[INFO] Loaded {len(accounts)} accounts from service')
+				return accounts
+			else:
+				print(f'[FAILED] Service returned error: {result.get("message")}')
+				return None
+		else:
+			print(f'[FAILED] Service request failed with status {response.status_code}')
+			return None
+
+	except Exception as e:
+		print(f'[FAILED] Error fetching accounts from service: {e}')
+		return None
+	finally:
+		client.close()
+
+
+def report_checkin_result_to_service(service_config: AccountServiceConfig, account_id: int, current_balance: float, current_used_quota: float) -> bool:
+	"""向账号服务上报签到结果"""
+	if not service_config.is_enabled():
+		return True
+
+	if not account_id:
+		return True
+
+	try:
+		client = httpx.Client(timeout=30.0)
+		url = f'{service_config.base_url}/checkin/report'
+		params = {'token': service_config.token}
+		data = {
+			'accountId': account_id,
+			'currentBalance': current_balance,
+			'currentUsedQuota': current_used_quota
+		}
+
+		print(f'[INFO] Reporting checkin result to service for account {account_id}')
+		response = client.post(url, params=params, json=data)
+
+		if response.status_code == 200:
+			result = response.json()
+			if result.get('code') == 200:
+				print(f'[SUCCESS] Checkin result reported successfully for account {account_id}')
+				return True
+			else:
+				print(f'[FAILED] Service returned error: {result.get("message")}')
+				return False
+		else:
+			print(f'[FAILED] Service request failed with status {response.status_code}')
+			return False
+
+	except Exception as e:
+		print(f'[FAILED] Error reporting checkin result to service: {e}')
+		return False
+	finally:
+		client.close()
+
+
+def update_login_expired(service_config: AccountServiceConfig, account_id: int) -> bool:
+	"""更新账号登录过期状态"""
+	if not service_config.is_enabled():
+		return True
+
+	if not account_id:
+		return True
+
+	try:
+		client = httpx.Client(timeout=30.0)
+		url = f'{service_config.base_url}/checkin/login-expired'
+		params = {'token': service_config.token, 'accountId': account_id}
+
+		print(f'[INFO] Updating login expired status for account {account_id}')
+		response = client.post(url, params=params)
+
+		if response.status_code == 200:
+			result = response.json()
+			if result.get('code') == 200:
+				print(f'[SUCCESS] Login expired status updated successfully for account {account_id}')
+				return True
+			else:
+				print(f'[FAILED] Service returned error: {result.get("message")}')
+				return False
+		else:
+			print(f'[FAILED] Service request failed with status {response.status_code}')
+			return False
+
+	except Exception as e:
+		print(f'[FAILED] Error updating login expired status: {e}')
+		return False
+	finally:
+		client.close()
+
+
 async def get_waf_cookies_with_playwright(account_name: str, login_url: str, required_cookies: list[str]):
 	"""使用 Playwright 获取 WAF cookies（隐私模式）"""
 	print(f'[PROCESSING] {account_name}: Starting browser to get WAF cookies...')
@@ -91,13 +203,12 @@ async def get_waf_cookies_with_playwright(account_name: str, login_url: str, req
 
 			try:
 				print(f'[PROCESSING] {account_name}: Access login page to get initial cookies...')
-
-				await page.goto(login_url, wait_until='networkidle')
+				await page.goto(login_url, wait_until='networkidle', timeout=30000)
 
 				try:
-					await page.wait_for_function('document.readyState === "complete"', timeout=5000)
+					await page.wait_for_function('document.readyState === "complete"', timeout=30000)
 				except Exception:
-					await page.wait_for_timeout(3000)
+					await page.wait_for_timeout(20000)
 
 				cookies = await page.context.cookies()
 
@@ -256,7 +367,7 @@ def format_check_in_notification(detail: dict) -> str:
 	return '\n'.join(lines)
 
 
-async def check_in_account(account: AccountConfig, account_index: int, app_config: AppConfig):
+async def check_in_account(account: AccountConfig, account_index: int, app_config: AppConfig, service_config: AccountServiceConfig):
 	"""为单个账号执行签到操作"""
 	account_name = account.get_display_name(account_index)
 	print(f'\n[PROCESSING] Starting to process {account_name}')
@@ -264,7 +375,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 	provider_config = app_config.get_provider(account.provider)
 	if not provider_config:
 		print(f'[FAILED] {account_name}: Provider "{account.provider}" not found in configuration')
-		return False, None
+		return False, None, None
 
 	print(f'[INFO] {account_name}: Using provider "{account.provider}" ({provider_config.domain})')
 
@@ -275,7 +386,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 
 	all_cookies = await prepare_cookies(account_name, provider_config, user_cookies)
 	if not all_cookies:
-		return False, None
+		return False, None, None
 
 	client = httpx.Client(http2=True, timeout=30.0)
 
@@ -293,7 +404,7 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 			'Sec-Fetch-Dest': 'empty',
 			'Sec-Fetch-Mode': 'cors',
 			'Sec-Fetch-Site': 'same-origin',
-			provider_config.api_user_key: account.api_user,
+			provider_config.api_user_key: account.api_user if account.api_user else '',
 		}
 
 		user_info_url = f'{provider_config.domain}{provider_config.user_info_path}'
@@ -302,17 +413,27 @@ async def check_in_account(account: AccountConfig, account_index: int, app_confi
 			print(user_info_before['display'])
 		elif user_info_before:
 			print(user_info_before.get('error', 'Unknown error'))
+			# 如果是 HTTP 401 错误，调用后台接口更新登录过期状态
+			if 'HTTP 401' in user_info_before.get('error', ''):
+				update_login_expired(service_config, account.account_id)
 
 		if provider_config.needs_manual_check_in():
 			success = execute_check_in(client, account_name, provider_config, headers)
 			# 签到后再次获取用户信息，用于计算签到收益
 			user_info_after = get_user_info(client, headers, user_info_url)
-			return success, user_info_before, user_info_after
 		else:
 			print(f'[INFO] {account_name}: Check-in completed automatically (triggered by user info request)')
 			# 自动签到的情况，再次获取用户信息
 			user_info_after = get_user_info(client, headers, user_info_url)
-			return True, user_info_before, user_info_after
+			success = True
+
+		# 向账号服务上报签到结果
+		if user_info_after and user_info_after.get('success'):
+			current_balance = user_info_after['quota']
+			current_used_quota = user_info_after['used_quota']
+			report_checkin_result_to_service(service_config, account.account_id, current_balance, current_used_quota)
+
+		return success, user_info_before, user_info_after
 
 	except Exception as e:
 		print(f'[FAILED] {account_name}: Error occurred during check-in process - {str(e)[:50]}...')
@@ -329,10 +450,19 @@ async def main():
 	app_config = AppConfig.load_from_env()
 	print(f'[INFO] Loaded {len(app_config.providers)} provider configuration(s)')
 
-	accounts = load_accounts_config()
-	if not accounts:
-		print('[FAILED] Unable to load account configuration, program exits')
-		sys.exit(1)
+	service_config = AccountServiceConfig.load_from_env()
+	if service_config.is_enabled():
+		print(f'[INFO] Account service is enabled: {service_config.base_url}')
+		accounts = get_accounts_from_service(service_config)
+		if not accounts:
+			print('[FAILED] Unable to load accounts from service, program exits')
+			sys.exit(1)
+	else:
+		print('[INFO] Account service is disabled, using local configuration')
+		accounts = load_accounts_config()
+		if not accounts:
+			print('[FAILED] Unable to load account configuration, program exits')
+			sys.exit(1)
 
 	print(f'[INFO] Found {len(accounts)} account configurations')
 
@@ -349,7 +479,7 @@ async def main():
 	for i, account in enumerate(accounts):
 		account_key = f'account_{i + 1}'
 		try:
-			success, user_info_before, user_info_after = await check_in_account(account, i, app_config)
+			success, user_info_before, user_info_after = await check_in_account(account, i, app_config, service_config)
 			if success:
 				success_count += 1
 
